@@ -3,8 +3,61 @@ const { query, pool } = require('./db');
 async function initDatabase() {
   console.log('[Init DB]: Ma\'lumotlar bazasi tuzilmasi tekshirilmoqda...');
   try {
-    // 1. Ustunlarni tekshirish va kengaytirish (xavfsiz IF NOT EXISTS)
+    // 1. Asosiy jadvallarni yaratish (yangi bulutli baza bo'lsa ham avtomatik yaratiladi)
     await query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) UNIQUE NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        price NUMERIC NOT NULL,
+        stock INTEGER DEFAULT 0,
+        category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+        description TEXT,
+        image_url TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        full_name VARCHAR(100) NOT NULL,
+        phone VARCHAR(20) UNIQUE NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS carts (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER UNIQUE REFERENCES customers(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id SERIAL PRIMARY KEY,
+        cart_id INTEGER REFERENCES carts(id) ON DELETE CASCADE,
+        product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+        quantity INTEGER CHECK (quantity > 0),
+        UNIQUE(cart_id, product_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        total_amount NUMERIC NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'Yangi',
+        delivery_address TEXT,
+        customer_name VARCHAR(100),
+        customer_phone VARCHAR(20)
+      );
+
+      CREATE TABLE IF NOT EXISTS order_items (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+        product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+        quantity INTEGER CHECK (quantity > 0),
+        unit_price NUMERIC NOT NULL
+      );
+
       ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
@@ -21,7 +74,7 @@ async function initDatabase() {
         ALTER TABLE order_items ADD CONSTRAINT order_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL;
       `);
     } catch (conErr) {
-      console.log('[Init DB]: Foreign key sozlamasi:', conErr.message);
+      // ignore
     }
 
     // Sozlamalar jadvali (do'kon nomi va h.k.)

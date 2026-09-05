@@ -85,9 +85,15 @@ async function startServer() {
   app.listen(PORT, () => {
     console.log(`[Server]: Veb-sayt muvaffaqiyatli ishga tushdi: http://localhost:${PORT}`);
     console.log(`[Admin]:  Boshqaruv paneli: http://localhost:${PORT}/admin`);
-    console.log(`[PostgreSQL]: Port 1234 (baza: markets) bilan ulanish faol.`);
     console.log('==================================================');
   });
 }
 
-startServer();
+if (process.env.VERCEL) {
+  // Vercel serverless muhitida
+  initDatabase().catch(err => console.warn('[Vercel DB Init]:', err.message));
+} else {
+  startServer();
+}
+
+module.exports = app;

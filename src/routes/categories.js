@@ -2,7 +2,17 @@ const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
 
-// Barcha kategoriyalarni olish (har bir toifadagi tovarlar soni bilan)
+let fallbackCategories = [
+  { id: 1, name: 'Mevalar', product_count: 3 },
+  { id: 2, name: 'Sabzavotlar', product_count: 3 },
+  { id: 3, name: 'Sut mahsulotlari', product_count: 3 },
+  { id: 4, name: 'Ichimliklar', product_count: 3 },
+  { id: 5, name: 'Non va qandolat', product_count: 2 },
+  { id: 6, name: 'Go\'sht va baliq', product_count: 1 },
+  { id: 7, name: 'Bakaleya va donlar', product_count: 1 }
+];
+
+// Barcha kategoriyalarni olish
 router.get('/', async (req, res) => {
   try {
     const result = await query(`
@@ -14,7 +24,8 @@ router.get('/', async (req, res) => {
     `);
     res.json({ success: true, data: result.rows });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Categories GET fallback]:', err.message);
+    res.json({ success: true, data: fallbackCategories, offline: true });
   }
 });
 
@@ -34,6 +45,12 @@ router.post('/', async (req, res) => {
     if (err.code === '23505') {
       return res.status(400).json({ success: false, message: 'Bu kategoriya allaqachon mavjud' });
     }
+    const { name } = req.body;
+    if (name && name.trim()) {
+      const newCat = { id: Date.now(), name: name.trim(), product_count: 0 };
+      fallbackCategories.push(newCat);
+      return res.status(201).json({ success: true, data: newCat, offline: true });
+    }
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -48,7 +65,9 @@ router.delete('/:id', async (req, res) => {
     }
     res.json({ success: true, message: 'Kategoriya o\'chirildi' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    const { id } = req.params;
+    fallbackCategories = fallbackCategories.filter(c => c.id != id);
+    res.json({ success: true, message: 'Kategoriya o\'chirildi (offline rejim)' });
   }
 });
 

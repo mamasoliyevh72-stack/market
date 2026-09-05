@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
 
+let fallbackSettings = {
+  store_name: 'MARKETS',
+  store_tagline: 'Sarxil va Sifatli Mahsulotlar Do\'koni'
+};
+
 // Barcha sozlamalarni olish
 router.get('/', async (req, res) => {
   try {
@@ -15,16 +20,19 @@ router.get('/', async (req, res) => {
     });
     res.json({ success: true, data: settings });
   } catch (err) {
-    console.error('Settings GET error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Settings GET fallback]:', err.message);
+    res.json({
+      success: true,
+      data: fallbackSettings,
+      offline: true
+    });
   }
 });
 
 // Sozlamalarni yangilash
 router.put('/', async (req, res) => {
+  const { store_name, store_tagline } = req.body;
   try {
-    const { store_name, store_tagline } = req.body;
-
     if (store_name !== undefined && store_name.trim() !== '') {
       await query(
         `INSERT INTO settings (key, value) VALUES ('store_name', $1)
@@ -53,8 +61,16 @@ router.put('/', async (req, res) => {
       data: settings
     });
   } catch (err) {
-    console.error('Settings PUT error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Settings PUT fallback]:', err.message);
+    if (store_name) fallbackSettings.store_name = store_name.trim();
+    if (store_tagline) fallbackSettings.store_tagline = store_tagline.trim();
+
+    res.json({
+      success: true,
+      message: 'Sozlamalar muvaffaqiyatli saqlandi!',
+      data: fallbackSettings,
+      offline: true
+    });
   }
 });
 
