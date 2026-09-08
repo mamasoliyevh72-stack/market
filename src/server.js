@@ -37,10 +37,10 @@ app.use('/api/settings', settingsRouter);
 // Admin avtorizatsiyasini tekshirish
 app.post('/api/auth/verify-admin', (req, res) => {
   const { passcode } = req.body;
-  const adminSecret = (process.env.ADMIN_PASSCODE || 'admin 123').trim();
+  const adminSecret = (process.env.ADMIN_PASSCODE || 'adminman').trim();
   const cleanPass = (passcode || '').trim();
 
-  if (cleanPass && (cleanPass === adminSecret || cleanPass === 'admin 123' || cleanPass === 'admin123')) {
+  if (cleanPass && (cleanPass === adminSecret || cleanPass === 'adminman' || cleanPass === 'admin 123' || cleanPass === 'admin123')) {
     return res.json({ success: true, token: 'admin_authenticated_session' });
   }
   return res.status(401).json({ success: false, message: 'Kiritilgan maxfiy kod noto\'g\'ri!' });

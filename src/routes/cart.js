@@ -1,6 +1,32 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
+const { getFallbackProducts } = require('./products');
+
+// Fallback xotiradagi savatcha (baza oflayn bo'lgan holatlar uchun)
+let fallbackCarts = {};
+
+function getFallbackCartResponse(customerId) {
+  const cid = parseInt(customerId, 10) || 1;
+  const items = fallbackCarts[cid] || [];
+  let totalAmount = 0;
+  let itemCount = 0;
+  items.forEach(it => {
+    it.total_item_price = it.quantity * it.price;
+    totalAmount += it.total_item_price;
+    itemCount += it.quantity;
+  });
+
+  return {
+    success: true,
+    cartId: 1,
+    customerId: cid,
+    items,
+    totalAmount,
+    itemCount,
+    offline: true
+  };
+}
 
 // Mijoz savatini olish yoki yaratish
 async function getOrCreateCart(customerId) {
@@ -13,12 +39,8 @@ async function getOrCreateCart(customerId) {
 
 // Savatchani ko'rish
 router.get('/:customerId', async (req, res) => {
+  const customerId = parseInt(req.params.customerId, 10) || 1;
   try {
-    const customerId = parseInt(req.params.customerId, 10);
-    if (!customerId) {
-      return res.status(400).json({ success: false, message: 'customerId talab qilinadi' });
-    }
-
     const cartId = await getOrCreateCart(customerId);
 
     const itemsRes = await query(
@@ -47,43 +69,32 @@ router.get('/:customerId', async (req, res) => {
     });
   } catch (err) {
     console.warn('[Cart GET fallback]:', err.message);
-    res.json({
-      success: true,
-      cartId: 1,
-      customerId: parseInt(req.params.customerId, 10) || 1,
-      items: [],
-      totalAmount: 0,
-      itemCount: 0,
-      offline: true
-    });
+    res.json(getFallbackCartResponse(customerId));
   }
 });
 
 // Savatchaga mahsulot qo'shish
 router.post('/add', async (req, res) => {
+  const { customer_id, product_id, quantity = 1 } = req.body;
+  if (!customer_id || !product_id) {
+    return res.status(400).json({ success: false, message: 'customer_id va product_id shart' });
+  }
+
+  const cid = parseInt(customer_id, 10) || 1;
+  const pid = parseInt(product_id, 10);
+  const qty = parseInt(quantity, 10) || 1;
+
   try {
-    const { customer_id, product_id, quantity = 1 } = req.body;
-    if (!customer_id || !product_id) {
-      return res.status(400).json({ success: false, message: 'customer_id va product_id shart' });
-    }
-
-    const qty = parseInt(quantity, 10);
-    if (qty <= 0) {
-      return res.status(400).json({ success: false, message: 'Miqdor 0 dan katta bo\'lishi kerak' });
-    }
-
-    // Mahsulot mavjudligini va ombor zaxirasini tekshirish
-    const productCheck = await query('SELECT id, name, stock, price FROM products WHERE id = $1', [product_id]);
+    const productCheck = await query('SELECT id, name, stock, price FROM products WHERE id = $1', [pid]);
     if (productCheck.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Mahsulot topilmadi' });
     }
 
-    const cartId = await getOrCreateCart(customer_id);
+    const cartId = await getOrCreateCart(cid);
 
-    // Savatda allaqachon bormi?
     const existing = await query(
       'SELECT id, quantity FROM cart_items WHERE cart_id = $1 AND product_id = $2',
-      [cartId, product_id]
+      [cartId, pid]
     );
 
     if (existing.rows.length > 0) {
@@ -107,30 +118,59 @@ router.post('/add', async (req, res) => {
       }
       await query(
         'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES ($1, $2, $3)',
-        [cartId, product_id, qty]
+        [cartId, pid, qty]
       );
     }
 
     res.json({ success: true, message: 'Mahsulot savatchaga qo\'shildi' });
   } catch (err) {
-    console.error('Cart ADD error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Cart ADD fallback]:', err.message);
+
+    const prods = (getFallbackProducts && getFallbackProducts()) || [];
+    const prod = prods.find(p => p.id === pid);
+    if (!prod) {
+      return res.status(404).json({ success: false, message: 'Mahsulot topilmadi' });
+    }
+
+    if (!fallbackCarts[cid]) fallbackCarts[cid] = [];
+    const existing = fallbackCarts[cid].find(item => item.product_id === pid);
+    if (existing) {
+      existing.quantity += qty;
+      existing.total_item_price = existing.quantity * existing.price;
+    } else {
+      fallbackCarts[cid].push({
+        id: Date.now(),
+        cart_id: 1,
+        product_id: pid,
+        quantity: qty,
+        name: prod.name,
+        price: parseFloat(prod.price),
+        stock: prod.stock,
+        image_url: prod.image_url,
+        total_item_price: qty * parseFloat(prod.price)
+      });
+    }
+
+    res.json({ success: true, message: 'Mahsulot savatchaga qo\'shildi', offline: true });
   }
 });
 
 // Miqdorni o'zgartirish
 router.post('/update', async (req, res) => {
+  const { customer_id, product_id, quantity } = req.body;
+  const cid = parseInt(customer_id, 10) || 1;
+  const pid = parseInt(product_id, 10);
+  const qty = parseInt(quantity, 10);
+
   try {
-    const { customer_id, product_id, quantity } = req.body;
-    const cartId = await getOrCreateCart(customer_id);
-    const qty = parseInt(quantity, 10);
+    const cartId = await getOrCreateCart(cid);
 
     if (qty <= 0) {
-      await query('DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2', [cartId, product_id]);
+      await query('DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2', [cartId, pid]);
       return res.json({ success: true, message: 'Mahsulot savatdan olib tashlandi' });
     }
 
-    const productCheck = await query('SELECT stock FROM products WHERE id = $1', [product_id]);
+    const productCheck = await query('SELECT stock FROM products WHERE id = $1', [pid]);
     if (productCheck.rows.length > 0 && qty > productCheck.rows[0].stock) {
       return res.status(400).json({
         success: false,
@@ -140,37 +180,62 @@ router.post('/update', async (req, res) => {
 
     await query(
       'UPDATE cart_items SET quantity = $1 WHERE cart_id = $2 AND product_id = $3',
-      [qty, cartId, product_id]
+      [qty, cartId, pid]
     );
 
     res.json({ success: true, message: 'Miqdor yangilandi' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Cart UPDATE fallback]:', err.message);
+    if (!fallbackCarts[cid]) fallbackCarts[cid] = [];
+
+    if (qty <= 0) {
+      fallbackCarts[cid] = fallbackCarts[cid].filter(it => it.product_id !== pid);
+    } else {
+      const it = fallbackCarts[cid].find(item => item.product_id === pid);
+      if (it) {
+        it.quantity = qty;
+        it.total_item_price = it.quantity * it.price;
+      }
+    }
+    res.json({ success: true, message: 'Miqdor yangilandi', offline: true });
   }
 });
 
 // Savatchadan bitta mahsulotni olib tashlash
 router.post('/remove', async (req, res) => {
+  const { customer_id, product_id } = req.body;
+  const cid = parseInt(customer_id, 10) || 1;
+  const pid = parseInt(product_id, 10);
+
   try {
-    const { customer_id, product_id } = req.body;
-    const cartId = await getOrCreateCart(customer_id);
-    await query('DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2', [cartId, product_id]);
+    const cartId = await getOrCreateCart(cid);
+    await query('DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2', [cartId, pid]);
     res.json({ success: true, message: 'Mahsulot savatdan olib tashlandi' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Cart REMOVE fallback]:', err.message);
+    if (fallbackCarts[cid]) {
+      fallbackCarts[cid] = fallbackCarts[cid].filter(it => it.product_id !== pid);
+    }
+    res.json({ success: true, message: 'Mahsulot savatdan olib tashlandi', offline: true });
   }
 });
 
 // Savatchani tozalash
 router.post('/clear', async (req, res) => {
+  const { customer_id } = req.body;
+  const cid = parseInt(customer_id, 10) || 1;
+
   try {
-    const { customer_id } = req.body;
-    const cartId = await getOrCreateCart(customer_id);
+    const cartId = await getOrCreateCart(cid);
     await query('DELETE FROM cart_items WHERE cart_id = $1', [cartId]);
     res.json({ success: true, message: 'Savatcha tozalandi' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.warn('[Cart CLEAR fallback]:', err.message);
+    fallbackCarts[cid] = [];
+    res.json({ success: true, message: 'Savatcha tozalandi', offline: true });
   }
 });
 
 module.exports = router;
+module.exports.getFallbackCart = (cid) => fallbackCarts[cid] || [];
+module.exports.clearFallbackCart = (cid) => { fallbackCarts[cid] = []; };

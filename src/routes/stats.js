@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
+const { getFallbackOrders } = require('./orders');
+const { getFallbackProducts } = require('./products');
 
 // Admin panel statistikasi
 router.get('/', async (req, res) => {
@@ -30,14 +32,24 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.warn('[Stats GET fallback]:', err.message);
+    const orders = (getFallbackOrders && getFallbackOrders()) || [];
+    const products = (getFallbackProducts && getFallbackProducts()) || [];
+
+    let totalRevenue = 0;
+    orders.forEach(o => {
+      if (o.status !== 'Bekor qilindi') totalRevenue += parseFloat(o.total_amount || 0);
+    });
+
+    const lowStockCount = products.filter(p => p.stock <= 5).length;
+
     res.json({
       success: true,
       stats: {
-        totalRevenue: 0,
-        totalOrders: 0,
-        totalProducts: 16,
-        lowStockCount: 0,
-        recentOrders: []
+        totalRevenue,
+        totalOrders: orders.length,
+        totalProducts: products.length,
+        lowStockCount,
+        recentOrders: orders.slice(0, 6)
       },
       offline: true
     });
